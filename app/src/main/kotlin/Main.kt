@@ -20,12 +20,34 @@ import java.time.Period
 import java.time.ZoneId
 import java.util.*
 import java.util.concurrent.CountDownLatch
+import java.util.regex.Pattern
 import kotlin.system.exitProcess
 
 
 fun main(args: Array<String>) {
-    produce()
-    streams()
+    val props = Properties()
+    props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
+    props[ConsumerConfig.GROUP_ID_CONFIG] = UUID.randomUUID().toString()
+    props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
+    props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
+    props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = LongDeserializer::class.java.canonicalName
+    props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 100
+
+    var consumer = KafkaConsumer<String, Long>(props)
+    consumer.subscribe(listOf("ExchSymbols"))
+
+    while (true) {
+        val records = consumer.poll(Duration.ofSeconds(5))
+
+        records.iterator().forEach {
+            println("${it.key()}-> ${it.value()}  @ ${Math.floorMod(it.timestamp() / 1000, 60L)}    ${it.timestamp()}")
+        }
+    }
+
+    consumer.close()
+
+    //produce()
+    //streams()
     //consume()
 }
 
