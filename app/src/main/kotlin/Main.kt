@@ -25,7 +25,7 @@ import kotlin.system.exitProcess
 
 
 fun main(args: Array<String>) {
-    val props = Properties()
+    /*val props = Properties()
     props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
     props[ConsumerConfig.GROUP_ID_CONFIG] = UUID.randomUUID().toString()
     props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
@@ -44,7 +44,7 @@ fun main(args: Array<String>) {
         }
     }
 
-    consumer.close()
+    consumer.close()*/
 
     //produce()
     //streams()

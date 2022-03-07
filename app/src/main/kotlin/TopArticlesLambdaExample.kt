@@ -16,26 +16,20 @@ import java.time.Duration
 import java.util.*
 
 /**
- * $ bin/kafka-topics --create --topic PageViews \
- * --zookeeper localhost:2181 --partitions 1 --replication-factor 1
- * $ bin/kafka-topics --create --topic TopNewsPerIndustry \
- * --zookeeper localhost:2181 --partitions 1 --replication-factor 1
- *
+ * $ bin/kafka-topics --create --topic PageViews --bootstrapServers localhost:9092 --partitions 1 --replication-factor 1
+ * $ bin/kafka-topics --create --topic TopNewsPerIndustry --bootstrapServers localhost:9092 --partitions 1 --replication-factor 1
  */
-object TopArticlesLambdaExampleKotlin {
+object TopArticlesLambdaExample {
     const val TOP_NEWS_PER_INDUSTRY_TOPIC = "TopNewsPerIndustry"
     const val PAGE_VIEWS = "PageViews"
-    val windowSize = Duration.ofHours(1)
+    val windowSize: Duration = Duration.ofHours(1)
+
     private fun isArticle(record: GenericRecord): Boolean {
-        val flags = record["flags"] as Utf8
+        val flags = record["flags"] as Utf8?
         return flags != null && flags.toString().contains("ARTICLE")
     }
 
-    fun buildTopArticlesStream(
-        bootstrapServers: String,
-        schemaRegistryUrl: String,
-        stateDir: String? = null
-    ): KafkaStreams {
+    fun buildTopArticlesStream(bootstrapServers: String, schemaRegistryUrl: String, stateDir: String? = null): KafkaStreams {
         val config = Properties()
         config[StreamsConfig.APPLICATION_ID_CONFIG] = "top-articles-lambda-example"
         config[StreamsConfig.CLIENT_ID_CONFIG] = "top-articles-lambda-example-client"
@@ -59,7 +53,7 @@ object TopArticlesLambdaExampleKotlin {
         )
         val builder = StreamsBuilder()
         val views = builder.stream<ByteArray, GenericRecord>(PAGE_VIEWS)
-        val schema: Schema = Schema.Parser().parse(
+        val schema = Schema.Parser().parse(
             """
                 {"namespace": "io.confluent.examples.streams.avro",
                  "type": "record",
@@ -84,10 +78,10 @@ object TopArticlesLambdaExampleKotlin {
             }
         val viewCounts = articleViews // count the clicks per hour, using tumbling windows with a size of one hour
             .groupByKey(Grouped.with(keyAvroSerde, valueAvroSerde))
-            .windowedBy(TimeWindows.of(windowSize))
+            .windowedBy(TimeWindows.ofSizeWithNoGrace(windowSize))
             .count()
-        val comparator =
-            java.util.Comparator { o1: GenericRecord, o2: GenericRecord -> (o2["count"] as Long - o1["count"] as Long).toInt() }
+        val comparator = java.util.Comparator { o1: GenericRecord, o2: GenericRecord -> (o2["count"] as Long - o1["count"] as Long).toInt() }
+
         val allViewCounts = viewCounts
             .groupBy( // the selector
                 { windowedArticle: Windowed<GenericRecord>, count: Long? ->
@@ -105,13 +99,16 @@ object TopArticlesLambdaExampleKotlin {
                     KeyValue(windowedIndustry, viewStats)
                 },
                 Grouped.with(windowedStringSerde, valueAvroSerde)
-            ).aggregate( // the initializer
-                { PriorityQueue(comparator) },  // the "add" aggregator
-                { windowedIndustry: Windowed<String>?, record: GenericRecord, queue: PriorityQueue<GenericRecord> ->
+            ).aggregate(
+                // the initializer
+                { PriorityQueue(comparator) },
+                // the "add" aggregator (windowedIndustry)
+                { _: Windowed<String>, record: GenericRecord, queue: PriorityQueue<GenericRecord> ->
                     queue.add(record)
                     queue
-                },  // the "remove" aggregator
-                { windowedIndustry: Windowed<String>?, record: GenericRecord, queue: PriorityQueue<GenericRecord> ->
+                },
+                // the "remove" aggregator
+                { _: Windowed<String>?, record: GenericRecord, queue: PriorityQueue<GenericRecord> ->
                     queue.remove(record)
                     queue
                 },
