@@ -51,6 +51,7 @@ object TopArticlesLambdaExample {
         val windowedStringSerde = WindowedSerdes.timeWindowedSerdeFrom(
             String::class.java, windowSize.toMillis()
         )
+
         val builder = StreamsBuilder()
         val views = builder.stream<ByteArray, GenericRecord>(PAGE_VIEWS)
         val schema = Schema.Parser().parse(
