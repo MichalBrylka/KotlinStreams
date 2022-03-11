@@ -6,7 +6,10 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.github.javafaker.Faker
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.clients.producer.*
+import org.apache.kafka.clients.producer.KafkaProducer
+import org.apache.kafka.clients.producer.ProducerConfig
+import org.apache.kafka.clients.producer.ProducerRecord
+import org.apache.kafka.clients.producer.RecordMetadata
 import org.apache.kafka.common.serialization.*
 import org.apache.kafka.streams.KafkaStreams
 import org.apache.kafka.streams.KeyValue
@@ -20,9 +23,7 @@ import java.time.Period
 import java.time.ZoneId
 import java.util.*
 import java.util.concurrent.CountDownLatch
-import java.util.regex.Pattern
 import kotlin.system.exitProcess
-
 
 fun main(args: Array<String>) {
     /*val props = Properties()
@@ -95,7 +96,7 @@ private fun consume() {
     props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = PersonSerdes::class.java.canonicalName
     props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 100
 
-    var consumer = KafkaConsumer<String, Person>(props)
+    val consumer = KafkaConsumer<String, Person>(props)
     consumer.subscribe(listOf("users"))
 
     while (true) {
@@ -111,7 +112,7 @@ private fun consume() {
 
     }
 
-    consumer.close()
+    //consumer.close()
 }
 
 private fun produce() {
@@ -119,7 +120,7 @@ private fun produce() {
     props[ProducerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
     props[ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG] = StringSerializer::class.java.canonicalName
     props[ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG] = PersonSerdes::class.java.canonicalName
-    var producer = KafkaProducer<String, Person>(props)
+    val producer = KafkaProducer<String, Person>(props)
 
 
     val faker = Faker()
@@ -130,20 +131,13 @@ private fun produce() {
             lastName = faker.name().lastName(),
             birthDate = faker.date().birthday()
         )
-        val record = ProducerRecord("users", fakePerson.fullName, fakePerson)
-        producer.send(record, DemoProducerCallback())
-    }
-    producer.close()
-}
-
-private class DemoProducerCallback : Callback {
-    override fun onCompletion(recordMetadata: RecordMetadata, e: Exception?) {
-        if (e != null) {
-            println("Error producing to topic " + recordMetadata.topic())
-            e.printStackTrace()
+        val record = ProducerRecord("people", fakePerson.fullName, fakePerson)
+        producer.send(record) { recordMetadata: RecordMetadata, e: Exception? ->
+            if (e != null) println("Error producing to topic ${recordMetadata.topic()}: $e")
         }
-
     }
+    producer.flush()
+    producer.close()
 }
 
 class PersonSerdes : JsonSerDes<Person>(Person::class.java)
