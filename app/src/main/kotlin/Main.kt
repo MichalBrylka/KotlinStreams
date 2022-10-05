@@ -1,165 +1,59 @@
-import com.fasterxml.jackson.annotation.JsonIgnore
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.SerializationFeature
-import com.fasterxml.jackson.databind.util.StdDateFormat
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import com.github.javafaker.Faker
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.clients.producer.KafkaProducer
-import org.apache.kafka.clients.producer.ProducerConfig
-import org.apache.kafka.clients.producer.ProducerRecord
-import org.apache.kafka.clients.producer.RecordMetadata
-import org.apache.kafka.common.serialization.*
-import org.apache.kafka.streams.KafkaStreams
-import org.apache.kafka.streams.KeyValue
-import org.apache.kafka.streams.StreamsBuilder
-import org.apache.kafka.streams.StreamsConfig
-import org.apache.kafka.streams.kstream.Consumed
-import org.apache.kafka.streams.kstream.Produced
-import java.time.Duration
-import java.time.LocalDate
-import java.time.Period
-import java.time.ZoneId
-import java.util.*
-import java.util.concurrent.CountDownLatch
-import kotlin.system.exitProcess
+import kotlin.reflect.KProperty1
+import kotlin.reflect.jvm.javaField
 
-fun main(args: Array<String>) {
-    /*val props = Properties()
-    props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
-    props[ConsumerConfig.GROUP_ID_CONFIG] = UUID.randomUUID().toString()
-    props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
-    props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
-    props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = LongDeserializer::class.java.canonicalName
-    props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 100
+data class Person(val name: String, val age: Number, val salary: Double) : Changeable
 
-    var consumer = KafkaConsumer<String, Long>(props)
-    consumer.subscribe(listOf("ExchSymbols"))
-
-    while (true) {
-        val records = consumer.poll(Duration.ofSeconds(5))
-
-        records.iterator().forEach {
-            println("${it.key()}-> ${it.value()}  @ ${Math.floorMod(it.timestamp() / 1000, 60L)}    ${it.timestamp()}")
-        }
-    }
-
-    consumer.close()*/
-
-    //produce()
-    //streams()
-    //consume()
+fun main() {
+    val info = "random_text,".repeat(1000)
+    val tt = info.splitToSequence(",").first()
 }
 
-fun streams() {
-    val props = Properties()
-    props[StreamsConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
-    props[StreamsConfig.APPLICATION_ID_CONFIG] = "PersonTrans"
-    props[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
 
+/**
+ * Marker interface for classes that allow it's read only properties to be changed under special cases i.e. for tests
+ */
+interface Changeable
 
-    val streamsBuilder = StreamsBuilder()
-    val personSerdes = PersonSerdes()
-    val personStream = streamsBuilder.stream(
-        "users",
-        Consumed.with(Serdes.String(), Serdes.WrapperSerde(personSerdes, personSerdes))
-    )
+/**
+ * Allows for visible / trackable changes of normally readonly properties
+ * <b>Sample usage</b>
+ *
+ * ```
+ * data class Person(val name: String, val age: Number, val salary: Double) : Changeable
+ * data class Person2(val name: String, val age: Number, val salary: Double) : Changeable
+ * data class Person3(val name: String, val age: Number, val salary: Double)
+ *
+ * fun main() {
+ *    //Person3("Mike", 38, 15.0) withChanged (Person3::age to { 1 })//will not work with not Changeable classes
+ *
+ *    val p = Person("Mike", 38, 15.0)
+ *    p withChanged (Person::age to { 1 })
+ *    //p withChanged (Person2::age to {99}) //error - property from different type
+ *    //p withChanged (Person::age to {"99"}) //error - type mismatch
+ *
+ *    p.withChanged(Person::age to { 2 }, Person::name to { "2" })
+ *
+ *    val changes = listOf(Person::age to { 3 }, Person::name to { "3" })
+ *    p.withChanged(changes)
+ * }
+ * ```
+ */
+infix fun <TReceiver : Changeable, TProperty> TReceiver.withChanged(change: Pair<KProperty1<TReceiver, TProperty>, TProperty>): TReceiver = this.also {
+    val (property, newValue) = change
+    val field = property.javaField ?: throw UnsupportedOperationException("${property.name} does not have a corresponding Java field")
 
-    val resStream = personStream.map { _, p ->
-        val birthDateLocal = p.birthDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-        val age = Period.between(birthDateLocal, LocalDate.now()).years
-        KeyValue("${p.firstName} ${p.lastName}", "$age")
-    }
-
-    resStream.to("ages", Produced.with(Serdes.String(), Serdes.String()))
-
-    val streams = KafkaStreams(streamsBuilder.build(), props)
-    val latch = CountDownLatch(1)
-    Runtime.getRuntime().addShutdownHook(Thread() { streams.close(); latch.countDown() })
-
-    try {
-        streams.start()
-        latch.await()
-    } catch (e: Throwable) {
-        println("ERROR " + e.message)
-        exitProcess(1)
-    }
-    exitProcess(0)
+    field.isAccessible = true
+    field.set(it, newValue)
 }
 
-private fun consume() {
-    val props = Properties()
-    props[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
-    props[ConsumerConfig.GROUP_ID_CONFIG] = "xxx"
-    props[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
-    props[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = PersonSerdes::class.java.canonicalName
-    props[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 100
+fun <TReceiver : Changeable> TReceiver.withChanged(vararg changes: Pair<KProperty1<TReceiver, Any>, Any>): TReceiver =
+    this.also { for (change in changes) it withChanged change }
 
-    val consumer = KafkaConsumer<String, Person>(props)
-    consumer.subscribe(listOf("users"))
-
-    while (true) {
-        val records = consumer.poll(Duration.ofSeconds(5))
-
-        records.iterator().forEach {
-            val person = it.value()
-            val birthDateLocal = person.birthDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
-            val age = Period.between(birthDateLocal, LocalDate.now()).years
-
-            println("${person.fullName} @$age")
-        }
-
-    }
-
-    //consumer.close()
-}
-
-private fun produce() {
-    val props = Properties()
-    props[ProducerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
-    props[ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG] = StringSerializer::class.java.canonicalName
-    props[ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG] = PersonSerdes::class.java.canonicalName
-    val producer = KafkaProducer<String, Person>(props)
+fun <TReceiver : Changeable> TReceiver.withChanged(changes: Iterable<Pair<KProperty1<TReceiver, Any>, Any>>): TReceiver =
+    this.also { for (change in changes) it withChanged change }
 
 
-    val faker = Faker()
-
-    for (i in 1..100) {
-        val fakePerson = Person(
-            firstName = faker.name().firstName(),
-            lastName = faker.name().lastName(),
-            birthDate = faker.date().birthday()
-        )
-        val record = ProducerRecord("people", fakePerson.fullName, fakePerson)
-        producer.send(record) { recordMetadata: RecordMetadata, e: Exception? ->
-            if (e != null) println("Error producing to topic ${recordMetadata.topic()}: $e")
-        }
-    }
-    producer.flush()
-    producer.close()
-}
-
-class PersonSerdes : JsonSerDes<Person>(Person::class.java)
-
-open class JsonSerDes<T>(private val tClass: Class<T>) : Serializer<T>, Deserializer<T> {
-    private val jsonMapper = ObjectMapper().apply {
-        registerKotlinModule()
-        disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-        dateFormat = StdDateFormat()
-    }
-
-    override fun serialize(topic: String?, data: T?): ByteArray? =
-        if (data == null) null else jsonMapper.writeValueAsBytes(data)
-
-    override fun deserialize(topic: String, data: ByteArray?): T? =
-        if (data == null) null else jsonMapper.readValue(data, tClass)
-
-    override fun close() {}
-    override fun configure(configs: MutableMap<String, *>?, isKey: Boolean) {}
-}
-
-data class Person(val firstName: String, val lastName: String, val birthDate: Date) {
-    @JsonIgnore
-    val fullName = "$firstName $lastName"
-}
+//rework to @OnlyInputTypes when this is resolved: https://youtrack.jetbrains.com/issue/KT-13198/Expose-OnlyInputTypes-annotation-to-allow-proper-checks-of-parameters-of-generic-methods-same-as-those-used-Collectioncontains
+infix fun <TReceiver : Changeable, TProperty> KProperty1<TReceiver, TProperty>.to(
+    that: (KProperty1<TReceiver, TProperty>) -> TProperty
+) = Pair(this, that(this))
